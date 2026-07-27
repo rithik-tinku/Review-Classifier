@@ -1,123 +1,139 @@
+import os
+import joblib
 import torch
-from transformers import BertTokenizer, BertForSequenceClassification
+from transformers import DistilBertTokenizer, DistilBertForSequenceClassification
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-# --- LOAD MODELS (ONCE) ---
-# Note: Ensure 'bert_model.pth' exists in your working directory.
-MODEL_NAME = "bert-base-uncased"
-tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
-
-# Initializing model structure for 5-class sentiment
-model = BertForSequenceClassification.from_pretrained(
-    MODEL_NAME, 
-    num_labels=5
-)
-
-# Load your custom weights
+# Load baseline models
 try:
-    model.load_state_dict(torch.load("bert_model.pth", map_location=torch.device("cpu")))
-    model.eval()
-except FileNotFoundError:
-    print("Warning: bert_model.pth not found. Using pre-trained base weights.")
+    vectorizer = joblib.load("models/baseline/tfidf_vectorizer.joblib")
+    base_model = joblib.load("models/baseline/logistic_model.joblib")
+    HAS_BASELINE = True
+except Exception:
+    HAS_BASELINE = False
+
+# Load DistilBERT model
+try:
+    if os.path.exists("models/distilbert"):
+        tokenizer = DistilBertTokenizer.from_pretrained("models/distilbert")
+        transformer_model = DistilBertForSequenceClassification.from_pretrained("models/distilbert")
+    else:
+        # Automatically download pretrained Hugging Face model when missing
+        tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+        transformer_model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=3)
+    transformer_model.eval()
+    HAS_TRANSFORMER = True
+except Exception:
+    HAS_TRANSFORMER = False
 
 vader = SentimentIntensityAnalyzer()
+labels = ["Negative", "Neutral", "Positive"]
 
-# Label mapping for the 5-class BERT output
-labels = [
-    "Very Negative",
-    "Negative",
-    "Neutral",
-    "Positive",
-    "Very Positive"
-]
 
-# --- SINGLE PREDICTION ---
-def predict_review(review):
+def predict_review(review, model_type="baseline"):
+    """
+    Predicts the sentiment of a single review.
+    Supported model types: 'baseline' (TF-IDF + LogReg) or 'transformer' (DistilBERT).
+    """
     if not review or str(review).strip() == "":
         return "Neutral"
-
+        
     text = str(review)
-    score = vader.polarity_scores(text)["compound"]
-
-    # Fast path: VADER (Rule-based)
-    if score >= 0.6:
-        return "Positive"
-    elif score <= -0.6:
-        return "Negative"
-
-    # Slow path: BERT (Transformer-based)
-    inputs = tokenizer(
-        text,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-        max_length=128
-    )
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-
-    logits = outputs.logits
-    predicted_class = torch.argmax(logits, dim=1).item()
-    sentiment = labels[predicted_class]
-
-    # Map 5 classes -> 3 simplified classes for the Dashboard
-    if sentiment in ["Very Positive", "Positive"]:
-        return "Positive"
-    elif sentiment in ["Very Negative", "Negative"]:
-        return "Negative"
-    else:
-        return "Neutral"
-
-# --- BATCH PREDICTION (FAST 🚀) ---
-def predict_batch(reviews):
-    if not reviews:
-        return []
-
-    # Pre-allocate results to maintain order
-    results = [None] * len(reviews)
-    bert_reviews = []
-    bert_indices = []
-
-    # Step 1: VADER fast filtering
-    for i, review in enumerate(reviews):
-        text = str(review)
+    
+    # Fallback to VADER for non-alphabetic texts (numbers-only, emoji-only, punctuation-only)
+    import re
+    if not re.search(r'[a-zA-Z]', text):
         score = vader.polarity_scores(text)["compound"]
-
-        if score >= 0.6:
-            results[i] = "Positive"
-        elif score <= -0.6:
-            results[i] = "Negative"
+        if score >= 0.05:
+            return "Positive"
+        elif score <= -0.05:
+            return "Negative"
         else:
-            # Uncertain/Neutral cases queued for BERT
-            bert_reviews.append(text)
-            bert_indices.append(i)
-
-    # Step 2: Process uncertain reviews in a single BERT batch
-    if bert_reviews:
+            return "Neutral"
+    
+    # 1. Baseline logic
+    if model_type == "baseline" and HAS_BASELINE:
+        text_vec = vectorizer.transform([text])
+        pred_idx = base_model.predict(text_vec)[0]
+        return labels[pred_idx]
+        
+    # 2. Transformer logic
+    elif model_type == "transformer" and HAS_TRANSFORMER:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        transformer_model.to(device)
+        
         inputs = tokenizer(
-            bert_reviews,
+            text,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=32
+        )
+        input_ids = inputs["input_ids"].to(device)
+        attention_mask = inputs["attention_mask"].to(device)
+        
+        with torch.no_grad():
+            outputs = transformer_model(input_ids=input_ids, attention_mask=attention_mask)
+        logits = outputs.logits
+        pred_idx = torch.argmax(logits, dim=1).item()
+        return labels[pred_idx]
+        
+    # 2b. Custom BERT logic
+    elif model_type == "bert":
+        if not os.path.exists("bert_model.pth"):
+            raise FileNotFoundError(
+                "❌ Custom trained checkpoint 'bert_model.pth' is missing! "
+                "This is a custom-trained checkpoint and cannot be downloaded automatically. "
+                "Please run train_model.py to train the model and generate this checkpoint, "
+                "or place the pre-trained 'bert_model.pth' file in the root directory."
+            )
+        
+        from transformers import BertTokenizer, BertForSequenceClassification
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        bert_model = BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=5)
+        bert_model.load_state_dict(torch.load("bert_model.pth", map_location=device))
+        bert_model.to(device)
+        bert_model.eval()
+        
+        inputs = bert_tokenizer(
+            text,
             return_tensors="pt",
             padding=True,
             truncation=True,
             max_length=128
         )
-
+        input_ids = inputs["input_ids"].to(device)
+        attention_mask = inputs["attention_mask"].to(device)
+        
         with torch.no_grad():
-            outputs = model(**inputs)
-
+            outputs = bert_model(input_ids=input_ids, attention_mask=attention_mask)
         logits = outputs.logits
-        preds = torch.argmax(logits, dim=1).tolist()
+        pred_idx = torch.argmax(logits, dim=1).item()
+        
+        labels_5 = ["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
+        sentiment = labels_5[pred_idx]
+        if sentiment in ["Very Positive", "Positive"]:
+            return "Positive"
+        elif sentiment in ["Very Negative", "Negative"]:
+            return "Negative"
+        else:
+            return "Neutral"
+        
+    # 3. Fallback to VADER (Rule-based)
+    score = vader.polarity_scores(text)["compound"]
+    if score >= 0.05:
+        return "Positive"
+    elif score <= -0.05:
+        return "Negative"
+    else:
+        return "Neutral"
 
-        for idx, pred_val in zip(bert_indices, preds):
-            sentiment = labels[pred_val]
-
-            if sentiment in ["Very Positive", "Positive"]:
-                results[idx] = "Positive"
-            elif sentiment in ["Very Negative", "Negative"]:
-                results[idx] = "Negative"
-            else:
-                results[idx] = "Neutral"
-
-    # Final pass: Ensure no 'None' values remain (safety)
-    return [r if r is not None else "Neutral" for r in results]
+def predict_batch(reviews, model_type="baseline"):
+    """
+    Predicts the sentiment of a batch of reviews.
+    """
+    if not reviews:
+        return []
+        
+    return [predict_review(r, model_type=model_type) for r in reviews]

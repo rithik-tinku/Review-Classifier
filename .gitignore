@@ -1,3 +1,42 @@
+# Virtual Environments
+venv/
+.venv/
+.venv-1/
+.venv-clean/
+.venv-validation/
+
+# Compiled python files
+*.pyc
+*.pyo
+*.pyd
 __pycache__/
+
+# System & Editor Caches
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Streamlit config/cache
+.streamlit/
+
+# ML/DL models & files
+models/
+checkpoints/
+*.safetensors
+*.bin
+*.pt
 *.pth
+*.joblib
+*.log
+datasets/
+cache/
+.cache/
+
+# Datasets
 *.csv
+data/
+
