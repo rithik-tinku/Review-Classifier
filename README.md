@@ -2,11 +2,19 @@
 
 A professional, production-grade, end-to-end Machine Learning and NLP pipeline that classifies product and service reviews into Negative, Neutral, and Positive sentiments. It compares an optimized TF-IDF + Logistic Regression baseline against a fine-tuned DistilBERT transformer model and supports rule-driven operational routing.
 
+## 🔗 Live Web Application (Interactive Demo)
+To understand more about this project and view the live implementation, check out our dashboard:
+- **Demo Website:** [WordLuxe Dashboard](https://word-luxe.lovable.app/dashboard)
+- **Username:** `Rithik`
+- **Password:** `rithikmettu`
+
+---
+
 ## 🚀 Key Features
 - **Dual Model Pipeline:** TF-IDF + Logistic Regression baseline and fine-tuned DistilBERT transformer.
 - **Rule-Driven Business Engine:** Centralized priority (P0-P3) routing, churn propensity warnings, and complaint category assignments (Refund, Late Delivery, Missing Item, App Crash, etc.).
 - **Hybrid VADER Routing:** Graceful fallback handling for non-alphabetic inputs (emojis, punctuation, numbers).
-- **Interactive Streamlit Dashboard:** Dynamic accuracy, pain points metrics, executive CSV exports, and automatic fallback data loading.
+- **Interactive Streamlit Dashboard:** Sentiment distribution charts, top problem keywords, intelligence feed, critical issue warnings, actionable Recommendations, CSV exports, and automatic fallback data loading.
 - **Robust Unit Testing:** Validates multilingual inputs, Hinglish, sarcasm, and edge-cases.
 - **Automatic Model Downloads:** Pretrained Hugging Face transformer models (like `distilbert-base-uncased`) are downloaded automatically if they are missing locally.
 - **Isolated Custom Checkpoint Management:** Keeps custom-trained large weights (e.g., `bert_model.pth`) out of Git history and provides clear error prompts and training recipes if they are missing.
